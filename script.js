@@ -472,19 +472,18 @@ confirmExportBtn.addEventListener('click', async () => {
             outPdf.registerFontkit(window.fontkit);
         }
 
-        let templatePdf;
-        let sourcePage;
+        let embeddedTemplate;
+        let isEmbeddedImage = false;
 
         const shouldCompress = qualityCompress.checked;
 
         if (loadedFileType === 'application/pdf') {
             if (shouldCompress) {
-                // Rasterize PDF using pdf.js to a new PDFDocument
-                templatePdf = await PDFDocument.create();
-                
+                // Rasterize PDF using pdf.js
+                isEmbeddedImage = true;
                 const loadingTask = pdfjsLib.getDocument({ data: loadedFileBuffer });
                 const pdf = await loadingTask.promise;
-                const page = await pdf.getPage(1); // For now we only use the first page as template
+                const page = await pdf.getPage(1);
                 
                 const viewport = page.getViewport({ scale: 2.0 }); // 2x scale for decent print quality
                 const cvs = document.createElement('canvas');
@@ -498,22 +497,16 @@ confirmExportBtn.addEventListener('click', async () => {
                 const base64Data = dataUrl.split(',')[1];
                 const jpegBytes = Uint8Array.from(atob(base64Data), c => c.charCodeAt(0));
                 
-                const pdfImage = await templatePdf.embedJpg(jpegBytes);
-                sourcePage = templatePdf.addPage([viewport.width, viewport.height]);
-                sourcePage.drawImage(pdfImage, {
-                    x: 0,
-                    y: 0,
-                    width: viewport.width,
-                    height: viewport.height,
-                });
+                embeddedTemplate = await outPdf.embedJpg(jpegBytes);
             } else {
-                templatePdf = await PDFDocument.load(loadedFileBuffer);
-                sourcePage = templatePdf.getPages()[0];
+                isEmbeddedImage = false;
+                const tempPdf = await PDFDocument.load(loadedFileBuffer);
+                const embeddedPages = await outPdf.embedPdf(tempPdf, [0]);
+                embeddedTemplate = embeddedPages[0];
             }
         } else {
             // It's an image
-            templatePdf = await PDFDocument.create();
-
+            isEmbeddedImage = true;
             let finalImageBuffer = loadedFileBuffer;
             if (shouldCompress) {
                 // Compress via Canvas
@@ -532,17 +525,9 @@ confirmExportBtn.addEventListener('click', async () => {
                 URL.revokeObjectURL(url);
             }
 
-            const pdfImage = shouldCompress || loadedFileType === 'image/jpeg'
-                ? await templatePdf.embedJpg(finalImageBuffer)
-                : await templatePdf.embedPng(finalImageBuffer);
-
-            sourcePage = templatePdf.addPage([originalPdfWidth, originalPdfHeight]);
-            sourcePage.drawImage(pdfImage, {
-                x: 0,
-                y: 0,
-                width: originalPdfWidth,
-                height: originalPdfHeight,
-            });
+            embeddedTemplate = shouldCompress || loadedFileType === 'image/jpeg'
+                ? await outPdf.embedJpg(finalImageBuffer)
+                : await outPdf.embedPng(finalImageBuffer);
         }
         // Calculate max pages needed again for generation
         let totalPagesNeeded = 0;
@@ -568,17 +553,31 @@ confirmExportBtn.addEventListener('click', async () => {
 
         const cssWidth = canvasWrapper.clientWidth;
         const cssHeight = canvasWrapper.clientHeight;
-        const pdfWidth = sourcePage.getWidth();
-        const pdfHeight = sourcePage.getHeight();
+        const pdfWidth = originalPdfWidth;
+        const pdfHeight = originalPdfHeight;
 
         const scaleX = pdfWidth / cssWidth;
         const scaleY = pdfHeight / cssHeight;
 
-        // We must call copyPages inside the loop to create INDEPENDENT page clones.
-        // If we do copyPages(..., [0,0,0]) it returns references to the SAME cloned page.
+        // Embed the template once and draw it on every page to save massive amounts of space
         for (let i = 0; i < totalPagesNeeded; i++) {
-            const [page] = await outPdf.copyPages(templatePdf, [0]);
-            outPdf.addPage(page);
+            const page = outPdf.addPage([pdfWidth, pdfHeight]);
+            
+            if (isEmbeddedImage) {
+                page.drawImage(embeddedTemplate, {
+                    x: 0,
+                    y: 0,
+                    width: pdfWidth,
+                    height: pdfHeight,
+                });
+            } else {
+                page.drawPage(embeddedTemplate, {
+                    x: 0,
+                    y: 0,
+                    width: pdfWidth,
+                    height: pdfHeight,
+                });
+            }
 
             for (const f of numberingFields) {
                 const pageIndex = i + 1;

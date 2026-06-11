@@ -1,0 +1,247 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>نَمّارة - ترقيم ملفات PDF والصور بسهولة</title>
+    
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Alexandria:wght@300;400;600;700&family=Cairo:wght@400;600&family=Tajawal:wght@400;500&family=Almarai:wght@400;700&display=swap" rel="stylesheet">
+    
+    <link rel="stylesheet" href="style.css">
+
+    <!-- PDF.js for rendering preview -->
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script>
+        pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js';
+    </script>
+    
+    <!-- pdf-lib for generating final PDF -->
+    <script src="https://unpkg.com/pdf-lib@1.17.1/dist/pdf-lib.min.js"></script>
+    
+    <!-- fontkit for custom fonts in pdf-lib -->
+    <script src="https://unpkg.com/@pdf-lib/fontkit/dist/fontkit.umd.js"></script>
+</head>
+<body>
+    <header class="app-header">
+        <div class="logo">نَمّارة</div>
+        <p class="subtitle">أداة بسيطة لترقيم المستندات بأناقة وسهولة</p>
+    </header>
+
+    <main class="app-container">
+        <!-- Sidebar for settings (initially hidden or disabled) -->
+        <aside class="sidebar" id="sidebar" aria-disabled="true">
+            <div class="sidebar-section">
+                <h2>إعدادات الترقيم</h2>
+                <button id="add-number-btn" class="btn primary" disabled>+ إضافة ترقيم جديد</button>
+            </div>
+            
+            <div id="numbering-fields-container" class="fields-container">
+                <!-- Dynamic fields will be added here -->
+            </div>
+
+            <div class="sidebar-footer">
+                <button id="generate-btn" class="btn success" disabled>تصدير ملف PDF النهائي</button>
+                <button id="reset-btn" class="btn outline" disabled>إلغاء والبدء من جديد</button>
+            </div>
+        </aside>
+
+        <!-- Main workspace area -->
+        <section class="workspace">
+            <!-- Initial Dropzone -->
+            <div id="dropzone" class="dropzone">
+                <div class="dropzone-content">
+                    <svg width="64" height="64" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+                        <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                        <polyline points="17 8 12 3 7 8"></polyline>
+                        <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                    <h3>اسحب وأفلت الملف هنا</h3>
+                    <p>أو انقر لاختيار ملف (PDF أو صورة)</p>
+                    <input type="file" id="file-input" accept="application/pdf, image/jpeg, image/png" hidden>
+                </div>
+            </div>
+
+            <!-- Preview Area (hidden until file is loaded) -->
+            <div id="preview-area" class="preview-area hidden">
+                <div class="canvas-wrapper" id="canvas-wrapper">
+                    <canvas id="pdf-preview"></canvas>
+                    <div id="overlay-container" class="overlay-container">
+                        <!-- Draggable numbering elements will be appended here -->
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Loading overlay -->
+            <div id="loading-overlay" class="loading-overlay hidden">
+                <div class="spinner"></div>
+                <p id="loading-text">جاري المعالجة...</p>
+            </div>
+        </section>
+    </main>
+    
+    <footer class="app-footer">
+        تم التطوير بواسطة <a href="https://t.me/wesamnabeel99" target="_blank">Wesam Nabeel</a> | 
+        <a href="https://t.me/wesamnabeel99" target="_blank" class="social-link">@wesamnabeel99</a>
+    </footer>
+
+    <!-- Template for a numbering field settings card -->
+    <template id="numbering-field-template">
+        <div class="numbering-card" data-id="">
+            <div class="card-header">
+                <h3 class="card-title">ترقيم <span class="card-index">1</span></h3>
+                <button class="btn-icon delete-btn" title="حذف" aria-label="حذف">×</button>
+            </div>
+            <div class="card-body">
+                <div class="form-group">
+                    <label>النص الثابت (مثل: NO.)</label>
+                    <input type="text" class="input-prefix" value="NO. " placeholder="أدخل النص...">
+                </div>
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>يبدأ من</label>
+                        <input type="number" class="input-start" value="1">
+                    </div>
+                    <div class="form-group">
+                        <label>ينتهي عند</label>
+                        <input type="number" class="input-end" value="10">
+                    </div>
+                    <div class="form-group">
+                        <label>خانات الأصفار</label>
+                        <input type="number" class="input-padding-zeros" value="3" min="0" max="10">
+                    </div>
+                </div>
+                <div class="form-group checkbox-group">
+                    <input type="checkbox" class="input-repeat" id="repeat-1">
+                    <label for="repeat-1">تكرار الترقيم عند الانتهاء</label>
+                </div>
+
+                <details class="advanced-settings">
+                    <summary>إعدادات متقدمة</summary>
+                    <div class="advanced-body">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>مقدار الزيادة / النقصان (Step)</label>
+                                <input type="number" class="input-step" value="1" min="1">
+                            </div>
+                            <div class="form-group">
+                                <label>النص اللاحق (Suffix)</label>
+                                <input type="text" class="input-suffix" value="" placeholder="مثال: / 2024">
+                            </div>
+                        </div>
+                        <div class="form-row">
+                            <div class="form-group">
+                                <label>تكرار نفس الرقم (نسخ كربونية)</label>
+                                <input type="number" class="input-copies" value="1" min="1" placeholder="مثال: 3 نسخ لكل رقم">
+                            </div>
+                            <div class="form-group">
+                                <label>دوران النص</label>
+                                <select class="input-rotation">
+                                    <option value="0">أفقي (0°)</option>
+                                    <option value="90">عمودي يمين (90°)</option>
+                                    <option value="180">مقلوب (180°)</option>
+                                    <option value="270">عمودي يسار (270°)</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                </details>
+                
+                <hr class="divider">
+                <h4 class="settings-title">التنسيق والمظهر</h4>
+                
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>حجم الخط</label>
+                        <input type="number" class="input-fontsize" value="24" min="10" max="100">
+                    </div>
+                    <div class="form-group">
+                        <label>لون الخط</label>
+                        <div class="color-picker-wrapper">
+                            <input type="color" class="input-textcolor" value="#000000">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>لون الخلفية</label>
+                        <div class="color-picker-wrapper">
+                            <input type="color" class="input-bgcolor" value="#ffffff">
+                            <input type="checkbox" class="input-bg-enabled" title="تفعيل لون الخلفية">
+                        </div>
+                    </div>
+                    <div class="form-group">
+                        <label>الهوامش (Padding)</label>
+                        <input type="number" class="input-padding" value="8" min="0" max="50">
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>حجم الإطار</label>
+                        <input type="number" class="input-borderwidth" value="0" min="0" max="20">
+                    </div>
+                    <div class="form-group">
+                        <label>لون الإطار</label>
+                        <div class="color-picker-wrapper">
+                            <input type="color" class="input-bordercolor" value="#000000">
+                        </div>
+                    </div>
+                </div>
+
+                <div class="form-row">
+                    <div class="form-group">
+                        <label>المحاذاة (Alignment)</label>
+                        <div class="alignment-group">
+                            <button type="button" class="align-btn" data-align="right" title="يمين">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="21" y1="6" x2="3" y2="6"></line><line x1="21" y1="12" x2="9" y2="12"></line><line x1="21" y1="18" x2="7" y2="18"></line></svg>
+                            </button>
+                            <button type="button" class="align-btn active" data-align="center" title="وسط">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="6"></line><line x1="21" y1="12" x2="3" y2="12"></line><line x1="18" y1="18" x2="6" y2="18"></line></svg>
+                            </button>
+                            <button type="button" class="align-btn" data-align="left" title="يسار">
+                                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="21" y1="6" x2="3" y2="6"></line><line x1="15" y1="12" x2="3" y2="12"></line><line x1="17" y1="18" x2="3" y2="18"></line></svg>
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </template>
+
+    <!-- Export Modal -->
+    <div id="export-modal" class="modal-overlay hidden">
+        <div class="modal-content">
+            <h2 class="modal-title">تصدير الملف النهائي</h2>
+            <div class="modal-body">
+                <div class="info-box">
+                    <strong>الحجم التقديري للملف:</strong> <span id="estimated-size" dir="ltr">جاري الحساب...</span>
+                </div>
+                <div class="form-group" id="compression-options">
+                    <label>خيارات جودة الصورة</label>
+                    <div class="radio-group">
+                        <input type="radio" name="quality" id="quality-original" value="original" checked>
+                        <label for="quality-original">الاحتفاظ بالجودة الأصلية (بدون ضغط)</label>
+                    </div>
+                    <div class="radio-group">
+                        <input type="radio" name="quality" id="quality-compress" value="compress">
+                        <label for="quality-compress">ضغط الصورة لتقليل الحجم</label>
+                    </div>
+                    <small class="hint">ملاحظة: الضغط متاح ومفيد بشكل أساسي للصور.</small>
+                </div>
+            </div>
+            <div class="modal-footer">
+                <button id="cancel-export-btn" class="btn outline" style="width: auto;">إلغاء</button>
+                <button id="confirm-export-btn" class="btn success" style="flex: 1;">إنشاء وتحميل PDF</button>
+            </div>
+        </div>
+    </div>
+
+    <script src="script.js"></script>
+</body>
+</html>
